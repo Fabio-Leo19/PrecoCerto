@@ -1,6 +1,5 @@
 import { getApp, getApps, initializeApp } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
-import { getFirestore } from 'firebase/firestore'
 
 // Estas chaves identificam o projeto web e são públicas por definição.
 // A segurança dos dados vem das regras do Firestore + Firebase Auth.
@@ -12,10 +11,9 @@ const config = {
 }
 
 export const cloudConfigured = Object.values(config).every(value => typeof value === 'string' && value.trim().length > 0)
-const app = cloudConfigured ? (getApps().length ? getApp() : initializeApp(config)) : null
+export const app = cloudConfigured ? (getApps().length ? getApp() : initializeApp(config)) : null
 
 export const auth = app ? getAuth(app) : null
-export const db = app ? getFirestore(app) : null
 if (auth) auth.languageCode = 'pt-BR'
 
 export function firebaseError(error: unknown): string {

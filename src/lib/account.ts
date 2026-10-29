@@ -7,8 +7,7 @@ import {
   signInWithPopup, signOut as firebaseSignOut, updatePassword as firebaseUpdatePassword,
   updateProfile, verifyPasswordResetCode, type User as FirebaseUser,
 } from 'firebase/auth'
-import { doc, getDoc, setDoc } from 'firebase/firestore'
-import { auth, db, firebaseError } from './firebase'
+import { auth, firebaseError } from './firebase'
 import { phoneToE164 } from './phone'
 
 export type AccountUser = {
@@ -71,14 +70,15 @@ function fromAuth(firebaseUser: FirebaseUser, profile?: ProfileDocument): Accoun
 }
 
 async function loadAccount(firebaseUser: FirebaseUser): Promise<AccountUser> {
+  const [{ db }, { doc, getDoc }] = await Promise.all([import('./cloudDb'), import('firebase/firestore')])
   if (!db) throw new Error('O banco de dados ainda não foi configurado.')
   const snapshot = await getDoc(doc(db, 'users', firebaseUser.uid, 'data', 'profile'))
   return fromAuth(firebaseUser, snapshot.exists() ? snapshot.data() as ProfileDocument : undefined)
 }
 
 function requireCloud() {
-  if (!auth || !db) throw new Error('Configure o Firebase para criar e acessar contas reais. A demonstração continua disponível.')
-  return { client: auth, database: db }
+  if (!auth) throw new Error('Configure o Firebase para criar e acessar contas reais. A demonstração continua disponível.')
+  return { client: auth }
 }
 
 async function shrinkPhoto(file: File): Promise<string> {
@@ -190,7 +190,7 @@ export function useAccount() {
       setUser(changed)
       return
     }
-    const { client, database } = requireCloud()
+    const { client } = requireCloud()
     const signedUser = client.currentUser
     if (!signedUser || !signedUser.emailVerified) throw new Error('Faça login antes de editar seu perfil.')
     const profile: ProfileDocument = {
@@ -201,7 +201,9 @@ export function useAccount() {
       avatarZoom: changes.avatarZoom ?? 100,
     }
     try {
-      await setDoc(doc(database, 'users', signedUser.uid, 'data', 'profile'), profile)
+      const [{ db }, { doc, setDoc }] = await Promise.all([import('./cloudDb'), import('firebase/firestore')])
+      if (!db) throw new Error('O banco de dados não está disponível.')
+      await setDoc(doc(db, 'users', signedUser.uid, 'data', 'profile'), profile)
       await updateProfile(signedUser, { displayName: profile.name || '' })
       setUser(fromAuth(signedUser, profile))
     } catch (error) { throw new Error(firebaseError(error)) }

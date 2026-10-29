@@ -6,3 +6,7 @@ import './avatarLayout.test.ts'
 import './emailActions.test.ts'
 
 import './backup.test.ts'
+
+import './saveQueue.test.ts'
+import './structure.test.ts'
+import './keyboardAvatar.test.ts'

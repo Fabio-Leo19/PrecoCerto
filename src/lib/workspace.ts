@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
-import { db, firebaseError } from './firebase'
+import { firebaseError } from './firebase'
+import { db } from './cloudDb'
 import type { PricingInputs } from './pricing'
 import { inspectBackup } from './backup'
+import { SaveQueue } from './saveQueue'
 
 export type Product = { id: number; name: string; category: string; cost: number; price: number }
 export type FeeProfile = { id: number; name: string; commission: number; fee: number; tax: number; demo?: boolean }
@@ -65,6 +67,8 @@ export function useWorkspace(accountMode: 'loading' | 'signedOut' | 'demo' | 'cl
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [error, setError] = useState('')
   const lastSaved = useRef('')
+  const saveQueue = useRef(new SaveQueue())
+  const restoring = useRef(false)
   const ready = identity !== null && identity === loadedIdentity
 
   useEffect(() => {
@@ -99,21 +103,28 @@ export function useWorkspace(accountMode: 'loading' | 'signedOut' | 'demo' | 'cl
   }, [identity, userId])
 
   useEffect(() => {
-    if (!ready || !identity) return
+    if (!ready || !identity || restoring.current) return
     const payload = JSON.stringify(workspace)
     if (payload === lastSaved.current) return
     setSaving('saving')
     let active = true
-    const timer = window.setTimeout(async () => {
-      try {
-        if (identity === 'demo') localStorage.setItem(demoKey, payload)
-        else if (db && userId) await setDoc(doc(db, 'users', userId, 'data', 'workspace'), {
-          data: workspace, updatedAt: new Date().toISOString(),
-        })
-        if (active) { lastSaved.current = payload; setSaving('saved'); setError('') }
-      } catch (caught) {
-        if (active) { setSaving('error'); setError(`Não foi possível salvar: ${firebaseError(caught)}`) }
-      }
+    const timer = window.setTimeout(() => {
+      if (restoring.current) return
+      void saveQueue.current.add(async () => {
+        if (restoring.current) return
+        try {
+          if (identity === 'demo') localStorage.setItem(demoKey, payload)
+          else if (db && userId) await setDoc(doc(db, 'users', userId, 'data', 'workspace'), {
+            data: workspace, updatedAt: new Date().toISOString(),
+          })
+          if (active && !restoring.current) { lastSaved.current = payload; setSaving('saved'); setError('') }
+        } catch (caught) {
+          if (active && !restoring.current) {
+            setSaving('error')
+            setError(`Não foi possível salvar: ${firebaseError(caught)}`)
+          }
+        }
+      })
     }, 700)
     return () => { active = false; clearTimeout(timer) }
   }, [workspace, ready, identity, userId])
@@ -128,8 +139,11 @@ export function useWorkspace(accountMode: 'loading' | 'signedOut' | 'demo' | 'cl
     if (saving === 'saving') throw new Error('Aguarde o salvamento atual terminar antes de restaurar.')
     const restored = inspectBackup(backup).data
     const payload = JSON.stringify(restored)
+    restoring.current = true
     setSaving('saving')
     try {
+      // Finish an in-flight autosave before restoring, to avoid overwriting the backup.
+      await saveQueue.current.idle()
       // Persist first. If storage fails, keep the current workspace untouched.
       if (identity === 'demo') localStorage.setItem(demoKey, payload)
       else if (db && userId) {
@@ -145,7 +159,7 @@ export function useWorkspace(accountMode: 'loading' | 'signedOut' | 'demo' | 'cl
       setSaving('error')
       setError(`Não foi possível restaurar os dados: ${firebaseError(caught)}`)
       throw caught
-    }
+    } finally { restoring.current = false }
   }
 
   return useMemo(() => ({

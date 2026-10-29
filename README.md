@@ -141,3 +141,17 @@ A solução usa Firebase direto no navegador com regras privadas por UID; **não
 ### Versão 1.0.4
 
 Esta distribuição contém o **código-fonte**; a pasta `dist` é gerada com `npm.cmd run build` depois de instalar as dependências. O ambiente usado para empacotar não conseguiu baixar o SDK para repetir o build completo, portanto o primeiro teste de compilação deve ser feito no seu computador. Os **9 testes unitários locais** (precificação, máscara de telefone e política mínima de senha) passaram.
+
+## Atualização 1.0.10 — carregamento e proteção
+
+O site carrega a tela de entrada e o espaço autenticado em módulos separados. O módulo do Firestore só é solicitado quando a conta autenticada precisa dos dados, reduzindo o código necessário para abrir o login. O salvamento automático passa a serializar gravações para evitar que uma requisição antiga substitua outra mais recente. Cabeçalhos de segurança foram adicionados à configuração Netlify sem mudar o fluxo de autenticação Google.
+
+Confira [NOTAS_V1_0_10.md](NOTAS_V1_0_10.md) antes de atualizar a produção. As regras do Firestore já publicadas no Console não são modificadas automaticamente.
+
+## Atualização 1.0.11 — avatar padrão e atalhos de formulário
+
+Quando uma conta ainda não tem foto, ou quando a imagem não pode ser carregada, o aplicativo mostra um ícone neutro de pessoa no círculo do avatar, em vez de uma imagem quebrada. O ícone é substituído assim que uma nova foto válida é definida.
+
+A tecla **Enter** envia os formulários de login, cadastro, recuperação de senha, produtos, perfis de taxas, dados pessoais e alteração de senha. As ações auxiliares continuam disponíveis por clique, sem disparar os envios por engano. Exclusões e restaurações de backup exigem confirmação explícita.
+
+Veja [NOTAS_V1_0_11.md](NOTAS_V1_0_11.md) para o teste funcional após a atualização. Os testes automatizados desta versão totalizam **42**, mas o login real e o salvamento remoto devem ser confirmados no navegador antes da publicação.
