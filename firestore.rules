@@ -1,0 +1,51 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(userId) {
+      return request.auth != null
+        && request.auth.uid == userId
+        && request.auth.token.email_verified == true;
+    }
+
+    function validProfile() {
+      return request.resource.data.keys().hasOnly([
+        'name', 'phone', 'avatar', 'avatarPosition', 'avatarPositionX', 'avatarZoom'
+      ])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 150
+        && request.resource.data.phone is string
+        && request.resource.data.phone.size() <= 20
+        && request.resource.data.avatar is string
+        && request.resource.data.avatar.size() <= 240000
+        && request.resource.data.avatarPosition is number
+        && request.resource.data.avatarPositionX is number
+        && request.resource.data.avatarZoom is number;
+    }
+
+    function validWorkspace() {
+      return request.resource.data.keys().hasOnly(['data', 'updatedAt'])
+        && request.resource.data.updatedAt is string
+        && request.resource.data.data is map
+        && request.resource.data.data.keys().hasAll(['products', 'profiles', 'calc', 'salePrice', 'scenarioPrices'])
+        && request.resource.data.data.products is list
+        && request.resource.data.data.products.size() <= 4000
+        && request.resource.data.data.profiles is list
+        && request.resource.data.data.profiles.size() <= 100
+        && request.resource.data.data.calc is map
+        && request.resource.data.data.scenarioPrices is list
+        && request.resource.data.data.scenarioPrices.size() == 3;
+    }
+
+    match /users/{userId}/data/{docId} {
+      allow get: if isOwner(userId) && docId in ['profile', 'workspace'];
+      allow list: if false;
+      allow create, update: if isOwner(userId) && (
+        (docId == 'profile' && validProfile()) ||
+        (docId == 'workspace' && validWorkspace())
+      );
+      allow delete: if false;
+    }
+  }
+}
