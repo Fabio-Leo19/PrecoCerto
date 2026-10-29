@@ -214,3 +214,11 @@ h1 { font-size: clamp(28px, 3vw, 42px); line-height: 1.1; letter-spacing: -1.7px
 .action-account-hint strong { color:var(--graphite); }
 .action-progress { padding:13px; border:1px solid var(--line);text-align:center;font-size:11px;color:var(--terra-dark);background:var(--paper); }
 .auth-action-card .primary:disabled { opacity:.6;cursor:not-allowed; }
+
+/* Backup: revisão explícita dos dados antes de substituir o Firestore. */
+.data-backup .backup-preview { flex-basis:100%;width:100%;padding:18px 20px;border:1px solid var(--line);background:var(--paper);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px; }
+.data-backup .backup-preview h3 {font-size:17px;margin:6px 0 8px;}
+.data-backup .backup-preview p {font-size:12px;line-height:1.55;margin:4px 0;}
+.data-backup .backup-preview > div:first-child {flex:1 1 290px;}
+.data-backup button:disabled {cursor:wait;opacity:.6;}
+@media (max-width:620px) { .data-backup .backup-preview {padding:16px;} .data-backup .backup-preview .backup-actions {width:100%;} .data-backup .backup-preview .backup-actions button {flex:1;min-width:130px;} }

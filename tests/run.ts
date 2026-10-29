@@ -4,3 +4,5 @@ import './password.test.ts'
 import './numberInput.test.ts'
 import './avatarLayout.test.ts'
 import './emailActions.test.ts'
+
+import './backup.test.ts'

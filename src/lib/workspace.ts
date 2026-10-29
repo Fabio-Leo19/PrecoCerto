@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from 'react'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { db, firebaseError } from './firebase'
 import type { PricingInputs } from './pricing'
+import { inspectBackup } from './backup'
 
 export type Product = { id: number; name: string; category: string; cost: number; price: number }
 export type FeeProfile = { id: number; name: string; commission: number; fee: number; tax: number; demo?: boolean }
@@ -122,16 +123,29 @@ export function useWorkspace(accountMode: 'loading' | 'signedOut' | 'demo' | 'cl
     [key]: typeof value === 'function' ? (value as (arg: Workspace[K]) => Workspace[K])(prev[key]) : value,
   }))
 
-  function restore(backup: unknown) {
-    if (!ready) throw new Error('Aguarde o carregamento da sua conta.')
-    if (!backup || typeof backup !== 'object' || (backup as { format?: string }).format !== 'precocerto-backup') {
-      throw new Error('Este arquivo não é um backup válido do PreçoCerto.')
+  async function restore(backup: unknown): Promise<void> {
+    if (!ready || !identity) throw new Error('Aguarde o carregamento da sua conta.')
+    if (saving === 'saving') throw new Error('Aguarde o salvamento atual terminar antes de restaurar.')
+    const restored = inspectBackup(backup).data
+    const payload = JSON.stringify(restored)
+    setSaving('saving')
+    try {
+      // Persist first. If storage fails, keep the current workspace untouched.
+      if (identity === 'demo') localStorage.setItem(demoKey, payload)
+      else if (db && userId) {
+        await setDoc(doc(db, 'users', userId, 'data', 'workspace'), {
+          data: restored, updatedAt: new Date().toISOString(),
+        })
+      } else throw new Error('A conexão com o Firebase não está disponível.')
+      lastSaved.current = payload
+      setWorkspace(restored)
+      setSaving('saved')
+      setError('')
+    } catch (caught) {
+      setSaving('error')
+      setError(`Não foi possível restaurar os dados: ${firebaseError(caught)}`)
+      throw caught
     }
-    const record = backup as { data?: unknown }
-    if (!record.data || typeof record.data !== 'object' || !Array.isArray((record.data as Workspace).products)) {
-      throw new Error('O arquivo não contém um catálogo válido.')
-    }
-    setWorkspace(validWorkspace(record.data, initialEmpty))
   }
 
   return useMemo(() => ({

@@ -8,6 +8,7 @@ import { formatBrazilianPhone, phoneToE164 } from './lib/phone'
 import { NumericInput } from './components/NumericInput'
 import { avatarImageStyle } from './lib/avatarLayout'
 import { parseEmailActionQuery } from './lib/emailActions'
+import { createBackup, inspectBackup, type BackupPreview } from './lib/backup'
 
 type Page = 'overview' | 'products' | 'calculator' | 'scenarios' | 'profiles' | 'my-profile' | 'security'
 type AuthView = 'login' | 'signup' | 'verify' | 'recover' | 'recover-email' | 'new-password' | 'verify-email' | 'recover-email-action' | 'action-result'
@@ -135,7 +136,7 @@ function App() {
       {page === 'products' && <Products products={products} calc={calc} search={search} setSearch={setSearch} category={category} setCategory={setCategory} setModal={setProductModal} setDelete={setDeleteProduct} duplicate={p => { setProducts([...products, { ...p, id: Date.now() + Math.floor(Math.random() * 1000), name: `${p.name} — cópia` }]); notify('Produto duplicado') }} />}
       {page === 'calculator' && <Calculator calc={calc} setCalc={setCalc} salePrice={salePrice} setSalePrice={setSalePrice} results={results} profiles={profiles} notify={notify} saving={workspace.saving} />}
       {page === 'scenarios' && <Scenarios calc={calc} prices={scenarioPrices} setPrices={setScenarioPrices} />}
-      {page === 'profiles' && <Profiles profiles={profiles} setModal={setProfileModal} backup={{ products, profiles, calc, salePrice, scenarioPrices }} restore={workspace.restore} notify={notify} />}
+      {page === 'profiles' && <Profiles profiles={profiles} setModal={setProfileModal} backup={{ products, profiles, calc, salePrice, scenarioPrices }} restore={workspace.restore} saving={workspace.saving} notify={notify} />}
       {page === 'my-profile' && <MyProfile user={user} save={account.saveAccount} uploadAvatar={account.uploadAvatar} notify={notify} />}
       {page === 'security' && <Security user={user} demo={account.status === 'demo'} account={account} notify={notify} />}
     </main>
@@ -327,36 +328,71 @@ function Scenarios({ calc, prices, setPrices }: { calc: Calc; prices: number[]; 
   </div>
 }
 
-function Profiles({ profiles, setModal, backup, restore, notify }: {
+function Profiles({ profiles, setModal, backup, restore, saving, notify }: {
   profiles: Profile[]
   setModal: (p: Profile | 'new') => void
   backup: Workspace
-  restore: (value: unknown) => void
+  restore: (value: unknown) => Promise<void>
+  saving: 'idle' | 'saving' | 'saved' | 'error'
   notify: (message: string) => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [backupError, setBackupError] = useState('')
-  const download = () => {
-    const content = JSON.stringify({ format: 'precocerto-backup', version: 1, exportedAt: new Date().toISOString(), data: backup }, null, 2)
-    const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `precocerto-backup-${new Date().toISOString().slice(0, 10)}.json`
-    link.click()
-    window.setTimeout(() => URL.revokeObjectURL(url), 1500)
-    notify('Backup pronto para download')
+  const [pendingBackup, setPendingBackup] = useState<BackupPreview | null>(null)
+  const [importing, setImporting] = useState(false)
+
+  const download = (): boolean => {
+    try {
+      const content = createBackup(backup)
+      const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `precocerto-backup-${new Date().toISOString().slice(0, 10)}.json`
+      document.body.append(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1500)
+      notify('Backup gerado. Guarde o arquivo em local seguro.')
+      return true
+    } catch (caught) {
+      setBackupError(caught instanceof Error ? caught.message : 'Não foi possível exportar seus dados.')
+      return false
+    }
   }
+
   const importFile = async (file?: File) => {
     if (!file) return
     setBackupError('')
-    if (file.size > 2 * 1024 * 1024) { setBackupError('O backup excede 2 MB.'); return }
+    setPendingBackup(null)
+    if (file.size > 1024 * 1024) { setBackupError('O arquivo excede 1 MB.'); return }
     try {
-      const raw = JSON.parse(await file.text()) as unknown
-      if (!window.confirm('Importar este backup vai substituir os produtos, taxas e simulações atuais desta conta. Deseja continuar?')) return
-      restore(raw)
-      notify('Backup importado. Aguarde a confirmação de salvamento.')
-    } catch (caught) { setBackupError(caught instanceof Error ? caught.message : 'Arquivo inválido.') }
+      const preview = inspectBackup(JSON.parse(await file.text()) as unknown)
+      setPendingBackup(preview)
+    } catch (caught) {
+      setBackupError(caught instanceof Error ? caught.message : 'O arquivo não é um backup válido.')
+    }
   }
+
+  const confirmRestore = async () => {
+    if (!pendingBackup || importing) return
+    if (saving === 'saving') {
+      setBackupError('Aguarde o salvamento atual terminar antes de restaurar.')
+      return
+    }
+    if (!window.confirm('ATENÇÃO: isto substituirá TODOS os produtos, perfis de taxas e simulações desta conta. Continuar?')) return
+    setBackupError('')
+    // Preserve the current workspace before overwriting any data.
+    if (!download()) return
+    setImporting(true)
+    try {
+      await restore({ format: 'precocerto-backup', version: 1, exportedAt: pendingBackup.exportedAt, data: pendingBackup.data })
+      setPendingBackup(null)
+      notify('Backup restaurado e salvo com sucesso.')
+    } catch (caught) {
+      setBackupError(caught instanceof Error ? caught.message : 'Falha ao salvar a restauração.')
+    } finally { setImporting(false) }
+  }
+
   return <div className="page">
     <PageTitle title="Perfis de taxas" description="Salve combinações de taxas para aplicar rapidamente nas simulações." action={<button className="primary" onClick={() => setModal('new')}><Icon name="plus" />Novo perfil</button>} />
     <div className="info-banner"><strong>Você define as regras.</strong> Não presumimos taxas oficiais de nenhuma plataforma. Revise os percentuais conforme seu contrato.</div>
@@ -370,10 +406,21 @@ function Profiles({ profiles, setModal, backup, restore, notify }: {
       </button>)}
     </div>
     <section className="data-backup">
-      <div><span className="section-label">SEGURANÇA DOS DADOS</span><h2>Seu backup, nas suas mãos.</h2><p>Baixe uma cópia dos produtos, taxas e simulações. Você pode importar o arquivo em outra instalação do PreçoCerto, inclusive na demonstração. Guarde-o em um local seguro.</p></div>
-      <div className="backup-actions"><button className="primary" onClick={download}>Exportar meus dados</button><button className="secondary" onClick={() => inputRef.current?.click()}>Importar backup</button></div>
+      <div><span className="section-label">SEGURANÇA DOS DADOS</span><h2>Seu backup, nas suas mãos.</h2><p>Exporte seus produtos, taxas e simulações para um arquivo JSON. A importação substitui esses dados na conta atual, mas não altera o login ou a foto de perfil. Guarde o arquivo em local privado.</p></div>
+      <div className="backup-actions">
+        <button type="button" className="primary" onClick={download}>Exportar meus dados</button>
+        <button type="button" className="secondary" disabled={importing} onClick={() => inputRef.current?.click()}>Importar backup</button>
+      </div>
       <input ref={inputRef} hidden type="file" accept="application/json,.json" onChange={e => { void importFile(e.target.files?.[0]); e.target.value = '' }}/>
-      {backupError && <p className="auth-error">{backupError}</p>}
+      {pendingBackup && <div className="backup-preview" role="region" aria-label="Prévia do backup">
+        <div><span className="section-label">CONFERIR RESTAURAÇÃO</span><h3>Revise antes de substituir</h3>
+          <p>Este arquivo contém <strong>{pendingBackup.productCount} produtos</strong> e <strong>{pendingBackup.profileCount} perfis de taxas</strong>, além dos valores da calculadora e dos cenários.</p>
+          <p>{pendingBackup.exportedAt ? `Exportado em ${new Date(pendingBackup.exportedAt).toLocaleString('pt-BR')}.` : 'Data de exportação indisponível.'} Os dados atuais desta conta serão substituídos. Uma cópia será baixada automaticamente antes da restauração.</p>
+        </div>
+        <div className="backup-actions"><button type="button" className="secondary" disabled={importing} onClick={() => setPendingBackup(null)}>Cancelar</button>
+          <button type="button" className="danger-button" disabled={importing || saving === 'saving'} onClick={() => { void confirmRestore() }}>{importing ? 'Salvando…' : 'Confirmar restauração'}</button></div>
+      </div>}
+      {backupError && <p className="auth-error" role="alert">{backupError}</p>}
     </section>
   </div>
 }
